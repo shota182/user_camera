@@ -30,24 +30,28 @@ def main():
 
 def capture():
     # 変数
-    exposure = 30 # exposure
+    raspi = True
+    exposure = 50 # exposure
     gpio = 2 # laser cuicuit plus pin : gpio pin in raspberrypi
     checkerboard = (5,7)
     # 初期設定
     cap = cv2.VideoCapture(2) # web
-    subprocess.run(["v4l2-ctl", "-d", "/dev/video2", "-c", "auto_exposure=1"])
-    subprocess.run(["v4l2-ctl", "-d", "/dev/video2", "-c", f"exposure_time_absolute={exposure}"])
+    subprocess.run(["v4l2-ctl", "-d", "/dev/video2", "-c", "exposure_auto=1"])
+    subprocess.run(["v4l2-ctl", "-d", "/dev/video2", "-c", f"exposure_absolute={exposure}"])
+    # subprocess.run(["v4l2-ctl", "-d", "/dev/video2", "-c", "auto_exposure=1"])
+    # subprocess.run(["v4l2-ctl", "-d", "/dev/video2", "-c", f"exposure_time_absolute={exposure}"])
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     image_counter = 0
     now = datetime.datetime.now()
     folder = f"image_cap_{now.year}-{now.month}-{now.day}-{now.hour}-{now.minute}"
     # ssh関係
-    client = paramiko.SSHClient()
-    client.load_system_host_keys()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect('172.20.10.2', username='pi', password='raspberry')
-    stdin, stdout, stderr = client.exec_command(f"raspi-gpio set {gpio} op") # GPIOピンを出力モードに設定
+    if(raspi):
+        client = paramiko.SSHClient()
+        client.load_system_host_keys()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect('172.20.10.2', username='pi', password='raspberry')
+        stdin, stdout, stderr = client.exec_command(f"raspi-gpio set {gpio} op") # GPIOピンを出力モードに設定
         
     pri = True
     while True:
@@ -69,17 +73,19 @@ def capture():
                 continue
 
             # gpio High
-            stdin, stdout, stderr = client.exec_command(f"raspi-gpio set {gpio} dh") # High出力に設定
-            print(f"gpio {gpio} High")
-            time.sleep(0.5)
+            if(raspi):
+                stdin, stdout, stderr = client.exec_command(f"raspi-gpio set {gpio} dh") # High出力に設定
+                print(f"gpio {gpio} High")
+                time.sleep(0.5)
 
             # 前景撮影
             ret, frame = cap.read()
             image_front = copy.copy(frame)
 
             # gpio Low
-            stdin, stdout, stderr = client.exec_command(f"raspi-gpio set {gpio} dl") # Low出力に設定
-            print(f"gpio {gpio} Low")
+            if(raspi):
+                stdin, stdout, stderr = client.exec_command(f"raspi-gpio set {gpio} dl") # Low出力に設定
+                print(f"gpio {gpio} Low")
 
 
             # コーナー検出
@@ -97,6 +103,18 @@ def capture():
             fgmask = diff.apply(image_back)
             fgmask = diff.apply(image_front)
             diff = cv2.cvtColor(fgmask, cv2.COLOR_GRAY2RGB)
+
+            # 最小二乗法で直線の方程式を導出
+            points = np.argwhere(diff == 255)  # 白色（値が255）の点群の座標を取得
+            X = points[:, 1].reshape(-1, 1)
+            y = points[:, 0]
+            A = np.hstack([X, np.ones_like(X)])
+            m, c = np.linalg.lstsq(A, y, rcond=None)[0]
+            for x in range(diff.shape[1]):
+                y = int(m * x + c)
+                if 0 <= y < diff.shape[0]:
+                    diff[y, x] = [0, 255, 0]  # 緑色の直線
+
             # image = np.hstack((np.hstack((image_back, image_front)), diff))
             diff_simple = cv2.absdiff(image_back, image_front)
             fgbg = cv2.createBackgroundSubtractorMOG2()
@@ -113,6 +131,9 @@ def capture():
                 except: pass
                 cv2.imwrite(f"{folder}/{image_counter}_back.jpg", image_back)
                 cv2.imwrite(f"{folder}/{image_counter}_front.jpg", image_front)
+                # cv2.imwrite(f"{folder}/{image_counter}_diff0.jpg", diff_simple)
+                # cv2.imwrite(f"{folder}/{image_counter}_diff1.jpg", diff_gaussian)
+                # cv2.imwrite(f"{folder}/{image_counter}_diff2.jpg", diff)
                 print(f"saved image No.{image_counter}")
                 image_counter += 1
                 cv2.destroyWindow("img")
@@ -133,7 +154,7 @@ def test():
     # 背景差分、二値化した画像に最小二乗法で直線を当てはめて表示
     if(0):
         # 変数
-        file_list = "/home/sskr3/ros_ws/user_camera/image_cap_2023-11-5-14-47/*.jpg"
+        file_list = "/home/sskr3/ros_ws/user_camera/image_cap_2023-12-11-15-9/*.jpg"
         chessboard_size = (5, 7)
         square_size = 15.0 # [mm]
         camera_matrix = np.array([[724.50357,   0.     , 313.78345],
@@ -203,7 +224,7 @@ def test():
     # レーザキャリブレーションのテスト
     if(1):
         # 変数
-        file_list = "/home/sskr3/ros_ws/user_camera/image_cap_2023-11-5-14-47/*.jpg"
+        file_list = "/home/sskr3/ros_ws/user_camera/image_cap_2023-12-11-15-38/*.jpg"
         chessboard_size = (5, 7) # チェッカーボードのコーナーの数
         square_size = 15.0 # 1辺[mm]
         camera_matrix = np.array([[724.50357,   0.     , 313.78345],
@@ -216,6 +237,7 @@ def test():
         file_list_natsorted = natsorted(glob.glob(file_list)) # ファイル名の数字(str)昇順
         # winsize = (chessboard_size[0]*2+1, chessboard_size[1]*2+1) # cornersの探索範囲
         winsize = (5,5)
+        # winsize = (11,11)
         criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001) # corners収束判定基準
         objp = np.zeros((chessboard_size[0]*chessboard_size[1],3), np.float32)
         objp[:,:2] = np.mgrid[0:chessboard_size[0]*square_size:square_size,0:chessboard_size[1]*square_size:square_size].T.reshape(-1,2)
@@ -276,6 +298,7 @@ def test():
 
             # チェッカーボード3d座標
             ret, corners = cv2.findChessboardCorners(image_front, chessboard_size, None)
+            print(ret)
 
             corners2 = cv2.cornerSubPix(gray,corners,winsize,(-1,-1),criteria) # cornersだと粗いからサブピクセル精度で出す
             ret, rvecs, tvecs = cv2.solvePnP(objp, corners2, camera_matrix, distortion_coeff) # PnP問題
@@ -327,17 +350,26 @@ def test():
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
         # 平面
-        xx, yy = np.meshgrid(range(-60, 150, 10), range(-210, 210, 20))
+        xx, yy = np.meshgrid(range(30, 150, 10), range(-210, 210, 20))
         zz = (-d_pl - a_pl * xx - b_pl * yy) / c_pl
-        ax.plot_surface(xx, yy, zz, alpha=0.5, color="gray") # レーザ平面
-        ax.scatter(np.array(point_all).T[0], np.array(point_all).T[1], np.array(point_all).T[2], color="lime", lw=0.4) # レーザ全点群
+        # ---------------------------------------------------
+        # カラーマップに基づき、色を生成する。
+        # Z < 0 のパッチはアルファチャンネルを0として色を透明にする。
+        # norm = plt.Normalize(vmin=zz.min(), vmax=zz.max())
+        # colors = plt.cm.jet(norm(zz))
+        # colors[zz < 0] = (0, 0, 0, 0)
+        # ax.plot_surface(xx, yy, zz, alpha=0.5, color="pink", facecolors=colors, rstride=1, cstride=1) # レーザ平面
+        # ---------------------------------------------------
+        ax.plot_surface(xx, yy, zz, alpha=0.5, color="pink") # レーザ平面
+        ax.scatter(np.array(point_all).T[0], np.array(point_all).T[1], np.array(point_all).T[2], color="red", lw=0.4) # レーザ全点群
         # ax.plot([-50,-50,50,50,-50], [-50,50,50,-50,-50], [0,0,0,0,0], color="red")
-        ax.scatter([0], [0], [0], color="red", lw=0.5) # カメラ座標系原点
-        ax.plot([-60, 150], [0,0], [-(a_pl*(-60)+d_pl)/c_pl, -(a_pl*(150)+d_pl)/c_pl], color="cyan")
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
-        ax.set_xlim([-400, 400])
+        ax.plot([0, 70,70,-70,-70,70,0,-70,-70,0,70], [0,-30,30,30,-30,-30,0,-30,30,0,30], [0,30,30,30,30,30,0,30,30,0,30], color="black", lw=2) # カメラ座標系原点
+        ax.scatter([0], [0], [0], color="black", lw=3)
+        # ax.plot([-60, 150], [0,0], [-(a_pl*(-60)+d_pl)/c_pl, -(a_pl*(150)+d_pl)/c_pl], color="cyan")
+        ax.set_xlabel('X[mm]', fontsize=15)
+        ax.set_ylabel('Y[mm]', fontsize=15)
+        ax.set_zlabel('Z[mm]', fontsize=15)
+        ax.set_xlim([-300, 300])
         ax.set_ylim([-200, 200])
         ax.set_zlim([0, 400])
         plt.show()

@@ -176,7 +176,7 @@ def main():
                 break
             cv2.imshow("Camera Frame", frame)
             i += 1
-            subprocess.run(["v4l2-ctl", "-d", "/dev/video2", "-c", f"exposure_time_absolute={ex[int(i%2)]}"])
+            # subprocess.run(["v4l2-ctl", "-d", "/dev/video2", "-c", f"exposure_time_absolute={ex[int(i%2)]}"])
             # time.sleep(0.2)
             # 'q'キーを押してループを終了
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -306,7 +306,7 @@ def main():
 
         fourcc = {"MJPG":('MJPG', ".avi")}
         w_fourcc = cv2.VideoWriter_fourcc(*fourcc["MJPG"][0])
-        out = cv2.VideoWriter(f"test_vibration{fourcc['MJPG'][1]}", w_fourcc, 50.0, (640, 480), True)
+        out = cv2.VideoWriter(f"/home/sskr3/Videos/testpy{fourcc['MJPG'][1]}", w_fourcc, 50.0, (640, 480), True)
         key = cv2.waitKey(0) & 0xFF
         while True:
             ret, frame = cap.read()
