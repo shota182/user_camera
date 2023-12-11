@@ -3,6 +3,13 @@ import numpy as np
 import time
 import sys
 import subprocess
+import threading
+import itertools
+import matplotlib.pyplot as plt
+from matplotlib import animation
+
+pix = [] # 画素値平均の時間配列
+pix_num = 25 # FPS
 
 def red_binary_threshold(frame):
     # 赤色の抽出
@@ -21,7 +28,30 @@ def red_binary_threshold(frame):
     
     return binary_frame, points
 
+def dtft_plot():
+    fig = plt.figure(figsize=(10, 6))
+    params = {
+        'fig': fig,
+        'func': update,  # グラフを更新する関数
+        'interval': 10,  # 更新間隔 (ミリ秒)
+        'frames': itertools.count(0, 0.1),  # フレーム番号を生成するイテレータ
+    }
+    anime = animation.FuncAnimation(**params)
+    plt.show()
+
+def update(frame):
+    x = np.arange(0, 1, 1/pix_num)
+    print(pix)
+    if(len(pix)==pix_num):
+        plt.cla()
+        # plt.ylim(0,100)
+        plt.ylim(250, 400)
+        # plt.ylim(250, 650)
+        plt.grid()
+        plt.plot(x, pix, color="red")
+
 def main():
+    global pix
     height = 480
     width = 640
     if(len(sys.argv) > 1): video_path = int(sys.argv[1])
@@ -48,8 +78,11 @@ def main():
     # out2 = cv2.VideoWriter(f'/home/sskr3/Videos/laser_binarization/{current_time}_output2.avi', w_fourcc, 50.0, (frame_width,frame_height), True)
     # out3 = cv2.VideoWriter(f'/home/sskr3/Videos/laser_binarization/{current_time}_output3.avi', w_fourcc, 50.0, (frame_width*2,frame_height), True)
     
-    # ラズパイレーザon
-    
+    # plot
+    thread1 = threading.Thread(target=dtft_plot)
+    thread1.setDaemon(True)
+    thread1.start()
+
     while True:
         time.sleep(0.05)
         ret, frame = cap.read()
@@ -65,22 +98,23 @@ def main():
         X = points[:, 1].reshape(-1, 1)
         y = points[:, 0]
 
-        # wide = 200
-        # point = int(binary_frame.shape[0]/2)
-        # point = np.arange(point-wide, point+wide)
-        # x_num = np.column_stack(np.where((y > point-wide) & (y < point+wide)))
-        # x_num = np.column_stack(np.where(np.any(np.isin(y, point))))
+        wide = 200
+        point = int(binary_frame.shape[0]/2)
+        point = np.arange(point-wide, point+wide)
+        # x_num = np.column_stack(np.where((y > point-wide) & (y < point+wide))) # なにこれ
+        x_num = np.column_stack(np.where(np.any(np.isin(y, point))))
     
-        # x_point = np.array([X[n] for n in x_num]) # pointで指定したheight値の点群だけ抜き出す
-        # if(np.ravel(x_point) != np.array([])):
-        #     # print(x_point)
-        #     x_mean = int(np.mean(np.ravel(x_point)))
-        #     print(np.mean(np.ravel(x_point)))
-        #     # A = np.hstack([X, np.ones_like(X)])
-        #     # m, c = np.linalg.lstsq(A, y, rcond=None)[0]
-        #     for hei in range(binary_frame.shape[0]):
-        #         binary_frame[hei, x_mean] = [0, 255, 0]  # 緑色の直線
-        #     print("- * "*10)
+        x_point = np.array([X[n] for n in x_num]) # pointで指定したheight値の点群だけ抜き出す
+        if(len(np.ravel(x_point)) > 0):
+            # print(x_point)
+            x_mean = int(np.mean(np.ravel(x_point)))
+            # print(np.mean(np.ravel(x_point)))
+            pix.append(np.mean(np.ravel(x_point)))
+            if(len(pix)>pix_num): pix.pop(0)
+            # A = np.hstack([X, np.ones_like(X)])
+            # m, c = np.linalg.lstsq(A, y, rcond=None)[0]
+            for hei in range(binary_frame.shape[0]): binary_frame[hei, x_mean] = [0, 255, 0]  # 緑色の直線
+            print("- * "*10)
 
 
         # A = np.hstack([X, np.ones_like(X)])
@@ -101,8 +135,8 @@ def main():
         cv2.imshow('Original vs Binary', stacked_frame)
         
         # 動画に書き込み
-        out1.write(frame)
-        out2.write(binary_frame)
+        # out1.write(frame)
+        # out2.write(binary_frame)
         # out3.write(stacked_frame)
         
         # 'q'キーが押されたら終了
